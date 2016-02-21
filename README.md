@@ -3,6 +3,9 @@ Tools to help manage Shotwell photo libraries.
 They only work with Shotwell library database schema version 20 (don't worry, they'll check for you).
 Shotwell 0.18.0, at least, uses version 20.
 
+**These tools might corrupt your library database.**
+Make a back-up of your `photo.db` before using them.
+
 ## sw-consolidate
 Give it a directory `DIR`, and it will move all photos and videos into directories of the form `DIR/year/month/day/`.
 Also attempts to fix up dates.
