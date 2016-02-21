@@ -1,0 +1,160 @@
+#!/usr/bin/python3
+import argparse, os, os.path, sqlite3, time, datetime, re
+
+parser = argparse.ArgumentParser()
+parser.add_argument("-d", "--datadir", metavar="DIRECTORY", help="path to Shotwell's private data", default=os.path.join(os.getenv("XDG_DATA_HOME",default=os.path.join(os.getenv("HOME", default="~"),"local","share")),"shotwell"))
+parser.add_argument("INPUTDIR", help="source data directory to merge in")
+args = parser.parse_args()
+
+dbdstpath = os.path.join(args.datadir,"data","photo.db")
+dbsrcpath = os.path.join(args.INPUTDIR,"data","photo.db")
+
+def checkversion(path,conn):
+    (version,) = conn.execute("SELECT schema_version FROM versiontable").fetchone()
+    if not version == 20:
+        raise Exception (path + ": wrong schema (should be 20)")
+
+with sqlite3.connect(dbsrcpath) as srcconn:
+    srcconn.row_factory = sqlite3.Row
+    with sqlite3.connect(dbdstpath) as dstconn:
+        checkversion(dbdstpath,dstconn)
+        checkversion(dbsrcpath,srcconn)
+    
+        def same(x):
+            return x
+
+        def copy_table(tablename,matchcol,colpairs):
+            
+            item_dict = dict()
+
+            def mapitem(f,val):
+                if callable(f):
+                    return f(val)
+                else:
+                    return f
+
+            colnames = [col for (col,f) in colpairs]
+            qs = ["?" for (col,f) in colpairs]
+            sql = "INSERT INTO "+tablename+" ("+",".join(colnames)+") VALUES ("+",".join(qs)+")"
+
+            for item in srcconn.execute("SELECT * FROM "+tablename):
+                
+                ok = True
+                if matchcol is not None:
+                    (count,) = dstconn.execute("SELECT COUNT(*) FROM "+tablename+" WHERE "+matchcol+"=?",[item[matchcol]]).fetchone()
+                    if count == 1:
+                        print (tablename+": already " + item[matchcol])
+                        ok = False
+                if ok:
+                    vallist = [mapitem(f,item[col]) for (col,f) in colpairs]
+                    if matchcol is not None:
+                        print (tablename+": adding " + item[matchcol])
+                    else:
+                        print (tablename+": adding")
+                    # print (sql,vallist)
+                    cursor = dstconn.execute(sql,vallist)
+                    item_dict[item["id"]] = cursor.lastrowid
+
+            def item_map(val):
+                if val in item_dict:
+                    return item_dict[val]
+                else:
+                    return val
+
+            return item_map
+
+        def fix_table(tablename,colpairs):
+            for item in srcconn.execute("SELECT * FROM "+tablename):
+                for (col,f) in colpairs:
+                    oldval = item[col]
+                    newval = f(oldval)
+                    dstconn.execute("UPDATE "+tablename+" SET "+col+"=? WHERE id=?",[f(item[col]),item["id"]])
+
+        # Shotwell database is not in first normal form
+        def comma_list_map(srcmap):
+            def list_map(itemstext):
+                items = itemstext.split(",")
+                return ",".join([srcmap(item) for item in items])
+            return list_map
+
+        event_map = copy_table ("eventtable",None,[
+            ("name",same),
+            ("primary_photo_id",None),
+            ("time_created",same),
+            ("primary_source_id",None),
+            ("comment",same)
+            ])
+
+        photo_map = copy_table ("phototable","filename",[
+            ("filename",same),
+            ("width",same),
+            ("height",same),
+            ("filesize",same),
+            ("timestamp",same),
+            ("exposure_time",same),
+            ("orientation",same),
+            ("original_orientation",same),
+            ("import_id",same),
+            ("event_id",event_map),
+            ("transformations",same),
+            ("md5",same),
+            ("thumbnail_md5",same),
+            ("exif_md5",same),
+            ("time_created",same),
+            ("flags",same),
+            ("rating",same),
+            ("file_format",same),
+            ("title",same),
+            ("backlinks",same),
+            ("time_reimported",same),
+            ("editable_id",same),
+            ("metadata_dirty",same),
+            ("developer",same),
+            ("develop_shotwell_id",same),
+            ("develop_camera_id",same),
+            ("develop_embedded_id",same),
+            ("comment",same)
+            ])
+
+        # Deal with Shotwell's bizarre "thumb" format for tagtable.photo_id_list
+        def thumb_map(val):
+            if val is None:
+                return val
+            m = re.match("^thumb([\dA-Fa-f]+)$",val)
+            if not m:
+                return val
+            y = photo_map(int(m.group(1), 16))
+            return "thumb{:016x}".format(y)
+
+        fix_table("eventtable",[
+            ("primary_photo_id",thumb_map),
+            ("primary_source_id",thumb_map)
+            ])
+
+        tag_map = copy_table ("tagtable","name",[
+            ("name",same),
+            ("photo_id_list",comma_list_map(thumb_map)),
+            ("time_created",same)
+            ])
+
+        video_map = copy_table ("videotable","filename",[
+            ("filename",same),
+            ("width",same),
+            ("height",same),
+            ("clip_duration",same),
+            ("is_interpretable",same),
+            ("filesize",same),
+            ("timestamp",same),
+            ("exposure_time",same),
+            ("import_id",same),
+            ("event_id",event_map),
+            ("md5",same),
+            ("time_created",same),
+            ("rating",same),
+            ("title",same),
+            ("backlinks",same),
+            ("time_reimported",same),
+            ("flags",same),
+            ("comment",same),
+            ])
+

@@ -1,0 +1,109 @@
+#!/usr/bin/python3
+import argparse, os, os.path, sqlite3, time, datetime, re
+
+parser = argparse.ArgumentParser()
+parser.add_argument("-d", "--datadir", metavar="DIRECTORY", help="path to Shotwell's private data", default=os.path.join(os.getenv("XDG_DATA_HOME",default=os.path.join(os.getenv("HOME", default="~"),"local","share")),"shotwell"))
+parser.add_argument("LIBDIR", help="directory to move photos to")
+args = parser.parse_args()
+
+librarypath=args.LIBDIR
+if not os.path.isdir(librarypath):
+    print("Not a directory: " + librarypath)
+    exit(1)
+
+dbpath = os.path.join(args.datadir,"data","photo.db")
+
+def dateTimestamp(year,month,day):
+    return int(time.mktime(datetime.datetime(year,month,day, 0,0,0, 0).timetuple()))
+
+goodTimestamp = dateTimestamp(1980,1,1)
+
+def str2(n):
+    if n < 10:
+        return "0"+str(n)
+    else:
+        return str(n)
+
+def checkversion(path,conn):
+    (version,) = conn.execute("SELECT schema_version FROM versiontable").fetchone()
+    if not version == 20:
+        raise Exception (path + ": wrong schema (should be 20)")
+
+with sqlite3.connect(dbpath) as conn:
+    checkversion(dbpath,conn)
+
+    for tablename in ["phototable","videotable"]:
+
+        def move(oldpath,newpath):
+            def movefile():
+                os.makedirs(os.path.dirname(newpath),exist_ok=True)
+                os.rename(oldpath,newpath)
+            def moveentry():
+                conn.execute("UPDATE "+tablename+" SET filename=? WHERE filename=?",(newpath,oldpath))
+        
+            oldexists = os.path.isfile(oldpath)
+            newexists = os.path.isfile(newpath)
+        
+            if oldexists:
+                if newexists:
+                    # both exist
+                    print("Collision: " + oldpath + " & " + newpath)
+                else:
+                    # can move old to new
+                    print ("Moving: "+oldpath+" to "+newpath)
+                    movefile()
+                    moveentry()
+            else:
+                if newexists:
+                    # already moved, so just update database
+                    print ("Updating: "+oldpath+" to "+newpath)
+                    moveentry()
+                else:
+                    # missing
+                    print("Missing: " + oldpath)
+
+        # fix timestamp
+        updates = dict()
+        for (filepath,timestamp) in conn.execute("SELECT filename,exposure_time FROM "+tablename):
+            if timestamp < goodTimestamp:
+                dt = datetime.datetime.fromtimestamp(timestamp)
+                print("Bad time: " + filepath + ": " + str(dt))
+
+                fname = os.path.basename(filepath)
+                m = re.match("^(\d\d\d\d\d\d\d\d\d\d\d\d\d)\.jpg$",fname)
+                if m:
+                    ft = int(int(m.group(1))/1000)
+                    if ft >= goodTimestamp:
+                        updates[filepath]=ft
+                        continue
+                m = re.match("^"+librarypath+"/(\d\d\d\d)/(\d\d)/(\d\d)/(.*)$", filepath)
+                if m:
+                    ft = dateTimestamp(int(m.group(1)),int(m.group(2)),int(m.group(3)))
+                    if ft >= goodTimestamp:
+                        updates[filepath]=ft
+                        continue
+
+        for filepath in updates.keys():
+            print ("Updating: "+filepath)
+            conn.execute("UPDATE "+tablename+" SET exposure_time=? WHERE filename=?",(updates[filepath],filepath))
+
+        # fix wrong place
+        moves = dict()
+        for (filepath,timestamp) in conn.execute("SELECT filename,exposure_time FROM "+tablename):
+
+            if os.path.isfile(filepath) and os.path.getsize(filepath) == 0:
+                print("Empty: " + filepath)
+
+            m = re.match("^"+librarypath+"/(\d\d\d\d)/(\d\d)/(\d\d)/(.*)$", filepath)
+            dt = datetime.datetime.fromtimestamp(timestamp)
+            newpath=librarypath+"/" +str(dt.year)+"/"+str2(dt.month)+"/"+str2(dt.day)+"/"+os.path.basename(filepath)
+            if m:
+                ft = dateTimestamp(int(m.group(1)),int(m.group(2)),int(m.group(3)))
+                if abs(ft - timestamp) > 86400:
+                    moves[filepath] = newpath
+            else:
+                moves[filepath] = newpath
+
+        for oldpath in moves.keys():
+            newpath = moves[oldpath]
+            move(oldpath,newpath)
