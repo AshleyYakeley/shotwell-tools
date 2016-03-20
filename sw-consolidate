@@ -3,6 +3,7 @@ import argparse, os, os.path, sqlite3, time, datetime, re
 
 parser = argparse.ArgumentParser()
 parser.add_argument("-d", "--datadir", metavar="DIRECTORY", help="path to Shotwell's private data", default=os.path.join(os.getenv("XDG_DATA_HOME",default=os.path.join(os.getenv("HOME", default="~"),"local","share")),"shotwell"))
+parser.add_argument("-f","--flag",action="store_true",help="flag anomalies")
 parser.add_argument("LIBDIR", help="directory to move photos to")
 args = parser.parse_args()
 
@@ -32,22 +33,30 @@ def checkversion(path,conn):
 with sqlite3.connect(dbpath) as conn:
     checkversion(dbpath,conn)
 
+    libpathre = re.compile(os.path.join("^"+librarypath,"(\d\d\d\d)","(\d\d)","(\d\d)","(.*)$"))
+
     for tablename in ["phototable","videotable"]:
+
+        def flagitem(path):
+            if args.flag:
+                conn.execute("UPDATE "+tablename+" SET flags=flags|16 WHERE filename=?",[path])
 
         def move(oldpath,newpath):
             def movefile():
                 os.makedirs(os.path.dirname(newpath),exist_ok=True)
                 os.rename(oldpath,newpath)
             def moveentry():
-                conn.execute("UPDATE "+tablename+" SET filename=? WHERE filename=?",(newpath,oldpath))
-        
+                conn.execute("UPDATE "+tablename+" SET filename=? WHERE filename=?",[newpath,oldpath])
+
             oldexists = os.path.isfile(oldpath)
             newexists = os.path.isfile(newpath)
-        
+
             if oldexists:
                 if newexists:
                     # both exist
                     print("Collision: " + oldpath + " & " + newpath)
+                    flagitem(oldpath)
+                    flagitem(newpath)
                 else:
                     # can move old to new
                     print ("Moving: "+oldpath+" to "+newpath)
@@ -61,6 +70,8 @@ with sqlite3.connect(dbpath) as conn:
                 else:
                     # missing
                     print("Missing: " + oldpath)
+                    flagitem(oldpath)
+
 
         # fix timestamp
         updates = dict()
@@ -68,6 +79,7 @@ with sqlite3.connect(dbpath) as conn:
             if timestamp < goodTimestamp:
                 dt = datetime.datetime.fromtimestamp(timestamp)
                 print("Bad time: " + filepath + ": " + str(dt))
+                flagitem(filepath)
 
                 fname = os.path.basename(filepath)
                 m = re.match("^(\d\d\d\d\d\d\d\d\d\d\d\d\d)\.jpg$",fname)
@@ -76,7 +88,7 @@ with sqlite3.connect(dbpath) as conn:
                     if ft >= goodTimestamp:
                         updates[filepath]=ft
                         continue
-                m = re.match("^"+librarypath+"/(\d\d\d\d)/(\d\d)/(\d\d)/(.*)$", filepath)
+                m = libpathre.match(filepath)
                 if m:
                     ft = dateTimestamp(int(m.group(1)),int(m.group(2)),int(m.group(3)))
                     if ft >= goodTimestamp:
@@ -94,9 +106,9 @@ with sqlite3.connect(dbpath) as conn:
             if os.path.isfile(filepath) and os.path.getsize(filepath) == 0:
                 print("Empty: " + filepath)
 
-            m = re.match("^"+librarypath+"/(\d\d\d\d)/(\d\d)/(\d\d)/(.*)$", filepath)
+            m = libpathre.match(filepath)
             dt = datetime.datetime.fromtimestamp(timestamp)
-            newpath=librarypath+"/" +str(dt.year)+"/"+str2(dt.month)+"/"+str2(dt.day)+"/"+os.path.basename(filepath)
+            newpath=os.path.join(librarypath,str(dt.year),str2(dt.month),str2(dt.day),os.path.basename(filepath))
             if m:
                 ft = dateTimestamp(int(m.group(1)),int(m.group(2)),int(m.group(3)))
                 if abs(ft - timestamp) > 86400:
