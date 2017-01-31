@@ -19,12 +19,12 @@ with sqlite3.connect(dbsrcpath) as srcconn:
     with sqlite3.connect(dbdstpath) as dstconn:
         checkversion(dbdstpath,dstconn)
         checkversion(dbsrcpath,srcconn)
-    
+
         def same(x):
             return x
 
         def copy_table(tablename,matchcol,colpairs):
-            
+
             item_dict = dict()
 
             def mapitem(f,val):
@@ -38,7 +38,7 @@ with sqlite3.connect(dbsrcpath) as srcconn:
             sql = "INSERT INTO "+tablename+" ("+",".join(colnames)+") VALUES ("+",".join(qs)+")"
 
             for item in srcconn.execute("SELECT * FROM "+tablename):
-                
+
                 ok = True
                 if matchcol is not None:
                     (count,) = dstconn.execute("SELECT COUNT(*) FROM "+tablename+" WHERE "+matchcol+"=?",[item[matchcol]]).fetchone()
