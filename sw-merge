@@ -4,6 +4,7 @@ import argparse, os, os.path, sqlite3, time, datetime, re
 parser = argparse.ArgumentParser()
 parser.add_argument("-d", "--datadir", metavar="DIRECTORY", help="path to Shotwell's private data", default=os.path.join(os.getenv("XDG_DATA_HOME",default=os.path.join(os.getenv("HOME", default="~"),"local","share")),"shotwell"))
 parser.add_argument("INPUTDIR", help="source data directory to merge in")
+parser.add_argument("--dry-run", action="store_true", help="dry run only, don't change database")
 args = parser.parse_args()
 
 dbdstpath = os.path.join(args.datadir,"data","photo.db")
@@ -158,3 +159,8 @@ with sqlite3.connect(dbsrcpath) as srcconn:
             ("comment",same),
             ])
 
+        if args.dry_run:
+            dstconn.rollback()
+            print("No changes made.")
+        else:
+            print("Updating database")
