@@ -5,6 +5,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("-d", "--datadir", metavar="DIRECTORY", help="path to Shotwell's private data", default=os.path.join(os.getenv("XDG_DATA_HOME",default=os.path.join(os.getenv("HOME", default="~"),"local","share")),"shotwell"))
 parser.add_argument("INPUTDIR", help="source data directory to merge in")
 parser.add_argument("--dry-run", action="store_true", help="dry run only, don't change database")
+parser.add_argument("--debug", action="store_true", help="show SQL changes")
 args = parser.parse_args()
 
 dbdstpath = os.path.join(args.datadir,"data","photo.db")
@@ -24,7 +25,12 @@ with sqlite3.connect(dbsrcpath) as srcconn:
         def same(x):
             return x
 
-        def copy_table(tablename,matchcol,colpairs):
+        def dstexec(sql,vallist):
+            if args.debug:
+                print (sql,vallist)
+            return dstconn.execute(sql,vallist)
+
+        def copy_table(tablename,matchcol,colpairs,where=None):
 
             item_dict = dict()
 
@@ -38,11 +44,15 @@ with sqlite3.connect(dbsrcpath) as srcconn:
             qs = ["?" for (col,f) in colpairs]
             sql = "INSERT INTO "+tablename+" ("+",".join(colnames)+") VALUES ("+",".join(qs)+")"
 
-            for item in srcconn.execute("SELECT * FROM "+tablename):
+            whereclause = ""
+            if where is not None:
+                whereclause = " WHERE " + where
+
+            for item in srcconn.execute("SELECT * FROM "+tablename+whereclause):
 
                 ok = True
                 if matchcol is not None:
-                    (count,) = dstconn.execute("SELECT COUNT(*) FROM "+tablename+" WHERE "+matchcol+"=?",[item[matchcol]]).fetchone()
+                    (count,) = dstexec("SELECT COUNT(*) FROM "+tablename+" WHERE "+matchcol+"=?",[item[matchcol]]).fetchone()
                     if count == 1:
                         print (tablename+": already " + item[matchcol])
                         ok = False
@@ -52,8 +62,7 @@ with sqlite3.connect(dbsrcpath) as srcconn:
                         print (tablename+": adding " + item[matchcol])
                     else:
                         print (tablename+": adding")
-                    # print (sql,vallist)
-                    cursor = dstconn.execute(sql,vallist)
+                    cursor = dstexec(sql,vallist)
                     item_dict[item["id"]] = cursor.lastrowid
 
             def item_map(val):
@@ -69,13 +78,16 @@ with sqlite3.connect(dbsrcpath) as srcconn:
                 for (col,f) in colpairs:
                     oldval = item[col]
                     newval = f(oldval)
-                    dstconn.execute("UPDATE "+tablename+" SET "+col+"=? WHERE id=?",[f(item[col]),item["id"]])
+                    dstexec("UPDATE "+tablename+" SET "+col+"=? WHERE id=?",[f(item[col]),item["id"]])
 
         # Shotwell database is not in first normal form
         def comma_list_map(srcmap):
             def list_map(itemstext):
-                items = itemstext.split(",")
-                return ",".join([srcmap(item) for item in items])
+                if itemstext is None:
+                    return None
+                else:
+                    items = itemstext.split(",")
+                    return ",".join([srcmap(item) for item in items])
             return list_map
 
         event_map = copy_table ("eventtable",None,[
@@ -136,7 +148,7 @@ with sqlite3.connect(dbsrcpath) as srcconn:
             ("name",same),
             ("photo_id_list",comma_list_map(thumb_map)),
             ("time_created",same)
-            ])
+            ],where="photo_id_list IS NOT NULL")
 
         video_map = copy_table ("videotable","filename",[
             ("filename",same),
