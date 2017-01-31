@@ -49,7 +49,11 @@ with sqlite3.connect(dbpath) as conn:
                 os.makedirs(os.path.dirname(newpath),exist_ok=True)
                 os.rename(oldpath,newpath)
             def moveentry():
-                conn.execute("UPDATE "+tablename+" SET filename=? WHERE filename=?",[newpath,oldpath])
+                (count,) = conn.execute("SELECT COUNT(*) FROM "+tablename+" WHERE filename=?",[newpath]).fetchone()
+                if count > 0:
+                    conn.execute("DELETE FROM "+tablename+" WHERE filename=?",[oldpath])
+                else:
+                    conn.execute("UPDATE "+tablename+" SET filename=? WHERE filename=?",[newpath,oldpath])
 
             oldexists = os.path.isfile(oldpath)
             newexists = os.path.isfile(newpath)
