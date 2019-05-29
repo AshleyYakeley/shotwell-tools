@@ -60,10 +60,14 @@ with sqlite3.connect(dbpath) as conn:
 
             if oldexists:
                 if newexists:
-                    # both exist
-                    print("Collision: " + oldpath + " & " + newpath)
-                    flagitem(oldpath)
-                    flagitem(newpath)
+                    if os.path.samefile(oldpath,newpath):
+                        print ("Renaming: "+oldpath+" to "+newpath)
+                        moveentry()
+                    else:
+                        # both exist
+                        print("Collision: " + oldpath + " & " + newpath)
+                        flagitem(oldpath)
+                        flagitem(newpath)
                 else:
                     # can move old to new
                     print ("Moving: "+oldpath+" to "+newpath)
