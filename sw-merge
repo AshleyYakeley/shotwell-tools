@@ -1,8 +1,8 @@
-#!/usr/bin/python3
+#!/usr/bin/env python3
 import argparse, os, os.path, sqlite3, time, datetime, re
 
 parser = argparse.ArgumentParser()
-parser.add_argument("-d", "--datadir", metavar="DIRECTORY", help="path to Shotwell's private data", default=os.path.join(os.getenv("XDG_DATA_HOME",default=os.path.join(os.getenv("HOME", default="~"),"local","share")),"shotwell"))
+parser.add_argument("-d", "--datadir", metavar="DIRECTORY", help="path to Shotwell's private data", default=os.path.join(os.getenv("XDG_DATA_HOME",default=os.path.join(os.getenv("HOME", default="~"),".local","share")),"shotwell"))
 parser.add_argument("INPUTDIR", help="source data directory to merge in")
 parser.add_argument("--dry-run", action="store_true", help="dry run only, don't change database")
 parser.add_argument("--debug", action="store_true", help="show SQL changes")
@@ -13,8 +13,8 @@ dbsrcpath = os.path.join(args.INPUTDIR,"data","photo.db")
 
 def checkversion(path,conn):
     (version,) = conn.execute("SELECT schema_version FROM versiontable").fetchone()
-    if not version == 20:
-        raise Exception (path + ": wrong schema (should be 20)")
+    if not version in [20,24]:
+        raise Exception (path + ": wrong schema " + str(version) + " (should be 20 or 24)")
 
 with sqlite3.connect(dbsrcpath) as srcconn:
     srcconn.row_factory = sqlite3.Row
